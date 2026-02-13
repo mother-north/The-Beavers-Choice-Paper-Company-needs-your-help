@@ -1,0 +1,167 @@
+# Beaver's Choice Paper Company - Multi-Agent System Design Document
+
+## 1. System Architecture Overview
+
+### 1.1 Agent Workflow Diagram
+
+The system architecture is illustrated in `workflow_diagram.png`. It consists of **4 agents** (within the 5-agent maximum constraint):
+
+1. **Orchestrator Agent** (Manager) - The central coordinator that receives all customer requests, delegates tasks to specialist agents, and composes final customer-facing responses.
+
+2. **Inventory Agent** (Worker) - Responsible for stock availability checks, individual item stock lookups, supplier delivery date estimation, and placing restock orders when needed.
+
+3. **Quoting Agent** (Worker) - Generates price quotes by searching historical quote data and calculating prices with bulk discount tiers.
+
+4. **Sales Agent** (Worker) - Finalizes sales transactions, verifies cash balance, and generates financial reports.
+
+### 1.2 Architecture Rationale
+
+The 4-agent architecture was chosen based on the following decision-making process:
+
+- **Why not 3 agents?** Combining quoting and sales into a single agent would create an overly complex agent with conflicting responsibilities (pricing strategy vs. transaction execution). Separation ensures each agent has a focused, non-overlapping role.
+
+- **Why not 5 agents?** A 5th agent (e.g., a customer negotiation agent) was considered as an enhancement but was not necessary for core functionality. The 4-agent design provides clean separation of concerns while staying well within the constraint.
+
+- **Why this delegation pattern?** The Orchestrator receives all requests and delegates in a fixed sequence: Inventory check -> Quote generation -> Sale finalization. This mirrors real-world paper supply operations where you verify stock before quoting and quote before selling.
+
+### 1.3 Tools and Helper Function Mapping
+
+Each worker agent has specific tools that wrap the provided helper functions:
+
+**Inventory Agent Tools:**
+| Tool | Helper Function(s) | Purpose |
+|---|---|---|
+| `check_inventory` | `get_all_inventory()` | Full inventory snapshot as of a date |
+| `check_item_stock` | `get_stock_level()` | Stock level for a specific item |
+| `check_delivery_date` | `get_supplier_delivery_date()` | Delivery estimate based on quantity |
+| `reorder_stock` | `create_transaction()`, `get_cash_balance()` | Place stock orders with cash verification |
+
+**Quoting Agent Tools:**
+| Tool | Helper Function(s) | Purpose |
+|---|---|---|
+| `search_quotes` | `search_quote_history()` | Find similar historical quotes |
+| `calculate_quote` | Paper supplies catalog | Calculate prices with bulk discounts |
+
+**Sales Agent Tools:**
+| Tool | Helper Function(s) | Purpose |
+|---|---|---|
+| `finalize_sale` | `create_transaction()`, `get_stock_level()` | Record sales with stock verification |
+| `check_cash_balance` | `get_cash_balance()` | Check company cash position |
+| `get_financial_report` | `generate_financial_report()` | Full financial report |
+
+All 7 required helper functions (`create_transaction`, `get_all_inventory`, `get_stock_level`, `get_supplier_delivery_date`, `get_cash_balance`, `generate_financial_report`, `search_quote_history`) are used across the tool definitions.
+
+### 1.4 Framework and Model
+
+- **Framework**: smolagents (HuggingFace) v1.24.0 - Chosen for minimal boilerplate, native OpenAI support, `@tool` decorator pattern, and built-in `ManagedAgent` orchestration.
+- **Model**: OpenAI gpt-4o-mini - Selected for cost efficiency (20 requests x 4+ agent calls each).
+
+---
+
+## 2. Evaluation Results
+
+### 2.1 Test Execution Summary
+
+The system was evaluated against all 20 requests in `quote_requests_sample.csv`. Results are documented in `test_results.csv`.
+
+| Metric | Result | Requirement |
+|---|---|---|
+| Requests processed | 20/20 | All requests from sample |
+| Cash balance changes | 5 | >= 3 |
+| Successfully fulfilled | 6 | >= 3 |
+| Not all fulfilled | True (14 unfulfilled/partial) | Required |
+
+### 2.2 Cash Balance Tracking
+
+| Request ID | Cash Change | Description |
+|---|---|---|
+| 1 | +$390.00 | Ceremony supplies (A4 paper, Cardstock, Colored paper) |
+| 4 | +$12.50 | Reception supplies (A4 printer paper) |
+| 6 | +$46.10 | Assembly supplies (Colored paper, Cardstock - partial) |
+| 12 | -$140.00 | Party supplies (restock order placed) |
+| 15 | +$46.10 | Demonstration supplies (partial fulfillment) |
+
+Starting balance: $45,059.70 | Final balance: $45,414.40 | Net change: +$354.70
+
+### 2.3 Strengths Identified
+
+1. **Reliable inventory checking**: The system consistently and accurately checked inventory before attempting to quote or sell, preventing overselling. All fulfilled orders were backed by verified stock levels.
+
+2. **Transparent customer communication**: Every response included clear explanations of what could and could not be fulfilled, with specific reasons (out of stock, not in catalog, insufficient quantity). This meets the industry best practice requirement for transparent outputs.
+
+3. **Bulk discount application**: The quoting agent correctly applied tiered bulk discounts (5% for 501-1000 units, 10% for 1001-5000, 15% for 5000+) and included pricing breakdowns in customer responses.
+
+4. **Graceful partial fulfillment**: When only some items from a request were available, the system fulfilled what it could and clearly communicated the gaps, rather than rejecting the entire order.
+
+5. **Fuzzy item name matching**: The `match_item_name()` utility successfully mapped varied customer descriptions (e.g., "colored construction paper", "heavy cardstock", "A4 printing paper") to exact catalog names, significantly improving order fulfillment rates.
+
+### 2.4 Areas for Improvement
+
+Several areas showed room for improvement during evaluation:
+
+1. **Item name resolution**: While fuzzy matching helped, some customer requests used descriptions that were too ambiguous to match reliably (e.g., "A3 paper" doesn't exist in catalog, "printer paper" could map to multiple items).
+
+2. **Stock depletion over time**: As inventory depleted through fulfilled orders, later requests found fewer items available. The system did not proactively restock between customer requests.
+
+3. **Date handling**: The LLM agents occasionally used incorrect dates for tool calls, requiring explicit date passing in the orchestrator prompt.
+
+---
+
+## 3. Suggestions for Improvement
+
+### Suggestion 1: Intelligent Proactive Restocking
+
+Currently the system only checks inventory when a customer request arrives. A significant improvement would be adding a **proactive inventory management** system that:
+
+- Monitors stock levels against minimum thresholds after each transaction
+- Automatically triggers restock orders for items that fall below `min_stock_level`
+- Considers upcoming demand patterns (e.g., if multiple recent requests asked for the same item, increase reorder quantities)
+- Schedules reorders based on supplier delivery lead times to ensure items arrive before they run out
+
+This would dramatically improve fulfillment rates for later requests in the evaluation sequence and better simulate real-world inventory management practices.
+
+### Suggestion 2: Semantic Item Name Resolution with Embeddings
+
+The current fuzzy matching system (`match_item_name()`) uses simple string containment and word overlap. A more robust approach would:
+
+- Use text embeddings (e.g., OpenAI's `text-embedding-3-small`) to create vector representations of all catalog item names
+- When a customer requests an item, embed their description and find the nearest catalog item by cosine similarity
+- Set a similarity threshold below which the system reports "item not found" rather than guessing
+- Handle compound requests like "glossy A4 paper" by decomposing them into individual items using the LLM before matching
+
+This would significantly reduce false negatives (items in stock but not matched) and improve the customer experience.
+
+### Suggestion 3: Customer Negotiation Agent (Stretch Goal)
+
+Add a 5th agent that acts as a **customer representative**, which would:
+
+- Parse the customer's emotional state (mood field in quote_requests.csv) to adjust communication tone
+- Negotiate with the multi-agent system on the customer's behalf when items are unavailable (suggest alternatives, request priority restocking)
+- Track customer history to offer loyalty discounts or priority fulfillment
+
+This would make the system more responsive to customer needs and could increase sales conversion rates.
+
+---
+
+## 4. Technical Notes
+
+### 4.1 Database Schema
+
+- **transactions**: Records stock orders and sales with item_name, type, units, price, date
+- **inventory**: Reference table with item names, categories, unit prices, and stock levels
+- **quotes**: Historical quote data with amounts, explanations, and metadata
+- **quote_requests**: Historical customer inquiries with mood, job, event, and request text
+
+### 4.2 Key Design Decisions
+
+- **Single file architecture**: All code resides in `project_starter.py` as required
+- **Module-level agent initialization**: Agents are created at import time, allowing the `run_test_scenarios()` function to use them directly
+- **Error handling**: The `process_customer_request()` wrapper catches all exceptions and returns a graceful customer-facing message
+- **Rate limiting**: 2-second delay between requests to avoid API rate limits with multiple agent calls per request
+
+### 4.3 Files Included in Submission
+
+1. `workflow_diagram.png` - Agent workflow diagram
+2. `project_starter.py` - Complete implementation (single Python file)
+3. `design_document.md` - This reflection report
+4. `test_results.csv` - Evaluation results from 20 test requests
