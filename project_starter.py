@@ -682,7 +682,7 @@ def search_quote_history(search_terms: List[str], limit: int = 5) -> List[Dict]:
 dotenv.load_dotenv()
 
 model = OpenAIServerModel(
-    model_id="gpt-4o",
+    model_id="gpt-4o-mini",
     api_key=os.getenv("OPENAI_API_KEY"),
 )
 
@@ -1132,8 +1132,8 @@ def run_test_scenarios():
     # Get initial state
     initial_date = quote_requests_sample["request_date"].min().strftime("%Y-%m-%d")
     report = generate_financial_report(initial_date)
-    current_cash = report["cash_balance"]
-    current_inventory = report["inventory_value"]
+    current_cash = round(report["cash_balance"], 2)
+    current_inventory = round(report["inventory_value"], 2)
 
     # Multi-agent system is initialized at module level (orchestrator_agent).
     # No additional initialization needed here.
@@ -1156,8 +1156,8 @@ def run_test_scenarios():
 
         # Update state
         report = generate_financial_report(request_date)
-        current_cash = report["cash_balance"]
-        current_inventory = report["inventory_value"]
+        current_cash = round(report["cash_balance"], 2)
+        current_inventory = round(report["inventory_value"], 2)
 
         print(f"Response: {response}")
         print(f"Updated Cash: ${current_cash:.2f}")
