@@ -163,5 +163,5 @@ This would make the system more responsive to customer needs and could increase 
 
 1. `workflow_diagram.png` - Agent workflow diagram
 2. `project_starter.py` - Complete implementation (single Python file)
-3. `design_document.md` - This reflection report
+3. `design_notes.txt` - This reflection report
 4. `test_results.csv` - Evaluation results from 20 test requests
